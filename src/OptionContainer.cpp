@@ -7,6 +7,7 @@
 #ifdef HAVE_CONFIG_H
 #include "e2config.h"
 #endif
+
 #include "LOptionContainer.hpp"
 #include "OptionContainer.hpp"
 #include "RegExp.hpp"
@@ -32,21 +33,18 @@ extern thread_local std::string thread_id;
 
 // IMPLEMENTATION
 
-OptionContainer::OptionContainer()
-{
+OptionContainer::OptionContainer() {
     log_Q = new Queue<std::string>;
     RQlog_Q = new Queue<std::string>;
-   // http_worker_Q = new Queue<LQ_rec>;
+    // http_worker_Q = new Queue<LQ_rec>;
 }
 
 
-OptionContainer::~OptionContainer()
-{
+OptionContainer::~OptionContainer() {
     reset();
 }
 
-void OptionContainer::reset()
-{
+void OptionContainer::reset() {
     //deleteFilterGroups();
     deletePlugins(dmplugins);
     deletePlugins(csplugins);
@@ -62,8 +60,7 @@ void OptionContainer::reset()
 }
 
 
-void OptionContainer::deletePlugins(std::deque<Plugin *> &list)
-{
+void OptionContainer::deletePlugins(std::deque<Plugin *> &list) {
     for (std::deque<Plugin *>::iterator i = list.begin(); i != list.end(); i++) {
         if ((*i) != NULL) {
             (*i)->quit();
@@ -73,140 +70,167 @@ void OptionContainer::deletePlugins(std::deque<Plugin *> &list)
     list.clear();
 }
 
-bool OptionContainer::read(std::string& filename, int type)
-{
-	conffilename = filename;
 
-	// all sorts of exceptions could occur reading conf files
-	try {
-		std::string linebuffer;
-		String temp;  // for tempory conversion and storage
-		std::ifstream conffiles(filename.c_str(), std::ios::in);  // e2guardian.conf
-		if (!conffiles.good()) {
-			if (!is_daemonised) {
-				std::cerr << "error reading: " << filename.c_str() << std::endl;
-			}
-			syslog(LOG_ERR, "%s", "error reading e2guardian.conf");
-			return false;
-		}
-		while (!conffiles.eof()) {
-			getline(conffiles, linebuffer);
-			if (!conffiles.eof() && linebuffer.length() != 0) {
-				if (linebuffer[0] != '#') {	// i.e. not commented out
-					temp = (char *) linebuffer.c_str();
-					if (temp.contains("#")) {
-						temp = temp.before("#");
-					}
-					temp.removeWhiteSpace();  // get rid of spaces at end of line
-					linebuffer = temp.toCharArray();
-					conffile.push_back(linebuffer);  // stick option in deque
-				}
-			}
-		}
-		conffiles.close();
+bool OptionContainer::readConfFile(const char *filename, String &list_pwd) {
+    std::string linebuffer;
+    String temp; // for tempory conversion and storage
+    String now_pwd(list_pwd);
+    std::ifstream conffiles(filename, std::ios::in); // e2guardianfN.conf
+    if (!conffiles.good()) {
+        if (!is_daemonised) {
+            std::cerr << thread_id << "Error reading: " << filename << std::endl;
+        }
+        syslog(LOG_ERR, "Error reading %s", filename);
+        return false;
+    }
+    String base_dir(filename);
+    base_dir.baseDir();
 
-                if (type == 0 || type == 2) {
-
-                    if ((pid_filename = findoptionS("pidfilename")) == "") {
-                        pid_filename = __PIDDIR;
-                        pid_filename += "/e2guardian.pid";
-                    }
-
-                    if (findoptionS("logsyslog") == "on") {
-                        log_syslog = true;
-                        if ((name_suffix = findoptionS("namesuffix")) == "") {
-                            name_suffix = "";
-                        }
-                    } else 	if ((log_location = findoptionS("loglocation")) == "") {
-                        log_location = __LOGLOCATION;
-                        log_location += "/access.log";
-                        log_syslog = false;
-                    }
-#ifndef NEWDEBUG_OFF
-		    if((debuglevel = findoptionS("debuglevel")) != "")
-		    {
-
-		    }
-		    if((path_debuglevel = findoptionS("debuglevelfile")) != "")
-		    {
-
-		    }
-		    myDebug = new DebugManager(debuglevel, path_debuglevel);
-#endif
-                    if ((RQlog_location = findoptionS("rqloglocation")) == "") {
-                        log_requests = false;
-                    } else {
-                        log_requests = true;
-                    }
-
-                    if ((stat_location = findoptionS("statlocation")) == "") {
-                        stat_location = __LOGLOCATION;
-                        stat_location += "/stats";
-                    }
-
-                    if ((dstat_location = findoptionS("dstatlocation")) == "") {
-                        dstat_log_flag = false;
-                    } else {
-                        dstat_log_flag = true;
-                        dstat_interval = findoptionI("dstatinterval");
-                        if ( dstat_interval  == 0) {
-                            dstat_interval = 300; // 5 mins
-                        }
-                    }
-
-                    if (findoptionS("statshumanreadable") == "on") {
-                        stats_human_readable = true;
-                    } else {
-                        stats_human_readable = false;
-                    }
-
-                    if ((dns_user_logging_domain = findoptionS("dnsuserloggingdomain")) == "") {
-                        dns_user_logging = false;
-                    } else {
-                        dns_user_logging = true;
-                    }
-
-                    log_header_value = findoptionS("logheadervalue");
-                    if (type == 0) {
-                        return true;
-                    }
+    while (!conffiles.eof()) {
+        getline(conffiles, linebuffer);
+        if (!conffiles.fail() && linebuffer.length() != 0) {
+            if (linebuffer[0] != '#') { // i.e. not commented out
+                temp = (char *) linebuffer.c_str();
+                if (temp.contains("#")) {
+                    temp = temp.before("#");
                 }
+                temp.removeWhiteSpace(); // get rid of spaces at end of line
+                while (temp.contains("__LISTDIR__")) {
+                    String temp2 = temp.before("__LISTDIR__");
+                    temp2 += now_pwd;
+                    temp2 += temp.after("__LISTDIR__");
+                    temp = temp2;
+                }
+                // deal with included files
+                if (temp.startsWith(".")) {
+                    temp = temp.after(".Include<").before(">");
+                    if (temp.length() > 0) {
+                        temp.fullPath(base_dir);
+                        if (!readConfFile(temp.toCharArray(), now_pwd)) {
+                            conffiles.close();
+                            return false;
+                        }
+                    }
+                    String temp2 = temp.after(".Define LISTDIR <").before(">");
+                    if (temp2.length() > 0) {
+                        now_pwd = temp2;
+                        //if(!now_pwd.endsWith("/"))
+                        //    now_pwd += "/";
+                    }
+                    continue;
+                }
+                // append ,listdir=now_pwd if line contains a file path - so that now_pwd can be passed
+                // to list file handler so that it can honour __LISTDIR__ in Included listfiles
+                if (temp.contains("path=") && !temp.contains("listdir=")) {
+                    temp += ",listdir=";
+                    temp += now_pwd;
+                }
+                linebuffer = temp.toCharArray();
+                conffile.push_back(linebuffer); // stick option in deque
+            }
+        }
+    }
+    conffiles.close();
+    return true;
+}
 
-		if ((daemon_user_name = findoptionS("daemonuser")) == "") {
-			daemon_user_name = __PROXYUSER;
-		}
+bool OptionContainer::read(std::string &filename, int type) {
+    conffilename = filename;
 
-		if ((daemon_group_name = findoptionS("daemongroup")) == "") {
-			daemon_group_name = __PROXYGROUP;
-		}
+    // all sorts of exceptions could occur reading conf files
+    try {
+        String list_pwd = __CONFDIR;
+        list_pwd += "/lists/common";
+        if (!readConfFile(filename.c_str(), list_pwd))
+            return false;
 
-		blocked_content_store = findoptionS("blockedcontentstore");
+        if (type == 0 || type == 2) {
 
-		if (findoptionS("nodaemon") == "on") {
-			no_daemon = true;
-		} else {
-			no_daemon = false;
-		}
-		
-		if (findoptionS("dockermode") == "on") {
-			no_daemon = true;
-			e2_front_log = true;
-		} else {
-			no_daemon = false;
-			e2_front_log = false;
-		}
+            if ((pid_filename = findoptionS("pidfilename")) == "") {
+                pid_filename = __PIDDIR;
+                pid_filename += "/e2guardian.pid";
+            }
 
-		if (findoptionS("nologger") == "on") {
-			no_logger = true;
-		} else {
-			no_logger = false;
-		}
+            if (findoptionS("logsyslog") == "on") {
+                log_syslog = true;
+                if ((name_suffix = findoptionS("namesuffix")) == "") {
+                    name_suffix = "";
+                }
+            } else if ((log_location = findoptionS("loglocation")) == "") {
+                log_location = __LOGLOCATION;
+                log_location += "/access.log";
+                log_syslog = false;
+            }
+#ifndef NEWDEBUG_OFF
+            if ((debuglevel = findoptionS("debuglevel")) != "") {
 
-		if (findoptionS("softrestart") == "on") {
-			soft_restart = true;
-		} else {
-			soft_restart = false;
-		}
+            }
+            if ((path_debuglevel = findoptionS("debuglevelfile")) != "") {
+
+            }
+            myDebug = new DebugManager(debuglevel, path_debuglevel);
+#endif
+            if ((RQlog_location = findoptionS("rqloglocation")) == "") {
+                log_requests = false;
+            } else {
+                log_requests = true;
+            }
+
+            if ((dstat_location = findoptionS("dstatlocation")) == "") {
+                dstat_log_flag = false;
+            } else {
+                dstat_log_flag = true;
+                dstat_interval = findoptionI("dstatinterval");
+                if (dstat_interval == 0) {
+                    dstat_interval = 300; // 5 mins
+                }
+            }
+
+            if (findoptionS("statshumanreadable") == "on") {
+                stats_human_readable = true;
+            } else {
+                stats_human_readable = false;
+            }
+
+            if ((dns_user_logging_domain = findoptionS("dnsuserloggingdomain")) == "") {
+                dns_user_logging = false;
+            } else {
+                dns_user_logging = true;
+            }
+
+            log_header_value = findoptionS("logheadervalue");
+            if (type == 0) {
+                return true;
+            }
+        }
+
+        if ((daemon_user_name = findoptionS("daemonuser")) == "") {
+            daemon_user_name = __PROXYUSER;
+        }
+
+        if ((daemon_group_name = findoptionS("daemongroup")) == "") {
+            daemon_group_name = __PROXYGROUP;
+        }
+
+        if (findoptionS("nodaemon") == "on") {
+            no_daemon = true;
+        } else {
+            no_daemon = false;
+        }
+
+        if (findoptionS("dockermode") == "on") {
+            no_daemon = true;
+            e2_front_log = true;
+        } else {
+            no_daemon = false;
+            e2_front_log = false;
+        }
+
+        if (findoptionS("nologger") == "on") {
+            no_logger = true;
+        } else {
+            no_logger = false;
+        }
 
 #ifdef __SSLMITM
         ssl_certificate_path = findoptionS("sslcertificatepath") + "/";
@@ -224,21 +248,21 @@ bool OptionContainer::read(std::string& filename, int type)
 
        if(enable_ssl) {
         bool ret = true;
-	if (findoptionS("useopensslconf") == "on") {
-		use_openssl_conf = true;
-		openssl_conf_path = findoptionS("opensslconffile");
-		if (openssl_conf_path == "") {
-			have_openssl_conf = false;
-		} else {
-			have_openssl_conf = true;
-		}
-	} else {
-		use_openssl_conf = false;
-	};
+    if (findoptionS("useopensslconf") == "on") {
+        use_openssl_conf = true;
+        openssl_conf_path = findoptionS("opensslconffile");
+        if (openssl_conf_path == "") {
+            have_openssl_conf = false;
+        } else {
+            have_openssl_conf = true;
+        }
+    } else {
+        use_openssl_conf = false;
+    };
 
         ca_certificate_path = findoptionS("cacertificatepath");
         if (ca_certificate_path == "") {
-		   if (!is_daemonised){
+           if (!is_daemonised){
                     std::cerr << "cacertificatepath is required when ssl is enabled" << std::endl;
             }
             syslog(LOG_ERR, "%s", "cacertificatepath is required when ssl is enabled");
@@ -247,7 +271,7 @@ bool OptionContainer::read(std::string& filename, int type)
 
         ca_private_key_path = findoptionS("caprivatekeypath");
         if (ca_private_key_path == "") {
-		   if (!is_daemonised){
+           if (!is_daemonised){
                     std::cerr << "caprivatekeypath is required when ssl is enabled" << std::endl;
             }
             syslog(LOG_ERR, "%s", "caprivatekeypath is required when ssl is enabled");
@@ -256,7 +280,7 @@ bool OptionContainer::read(std::string& filename, int type)
 
         cert_private_key_path = findoptionS("certprivatekeypath");
         if (cert_private_key_path == "") {
-		   if (!is_daemonised){
+           if (!is_daemonised){
                     std::cerr << "certprivatekeypath is required when ssl is enabled" << std::endl;
             }
             syslog(LOG_ERR, "%s", "certprivatekeypath is required when ssl is enabled");
@@ -265,7 +289,7 @@ bool OptionContainer::read(std::string& filename, int type)
 
         generated_cert_path = findoptionS("generatedcertpath") + "/";
         if (generated_cert_path == "/") {
-		   if (!is_daemonised){
+           if (!is_daemonised){
                     std::cerr << "generatedcertpath is required when ssl is enabled" << std::endl;
             }
             syslog(LOG_ERR, "%s", "generatedcertpath is required when ssl is enabled");
@@ -287,7 +311,7 @@ bool OptionContainer::read(std::string& filename, int type)
             set_cipher_list = "HIGH:!ADH:!MD5:!RC4:!SRP:!PSK:!DSS";
 
         if (ret) {
-            	ca = new CertificateAuthority(ca_certificate_path.c_str(),
+                ca = new CertificateAuthority(ca_certificate_path.c_str(),
                 ca_private_key_path.c_str(),
                 cert_private_key_path.c_str(),
                 generated_cert_path.c_str(),
@@ -303,27 +327,27 @@ bool OptionContainer::read(std::string& filename, int type)
         // Email notification patch by J. Gauthier
         mailer = findoptionS("mailer");
 #endif
- 
+
         monitor_helper = findoptionS("monitorhelper");
         if (monitor_helper == "") {
             monitor_helper_flag = false;
         } else {
             monitor_helper_flag = true;
-	}
+        }
 
-	server_name = findoptionS("servername");
+        server_name = findoptionS("servername");
         if (server_name == "") {
-        	char sysname[256];
-		int r;
-		r = gethostname(sysname, 256);
-		if (r == 0) {
-	   		server_name = sysname;
-		}
-	} 
-		
+            char sysname[256];
+            int r;
+            r = gethostname(sysname, 256);
+            if (r == 0) {
+                server_name = sysname;
+            }
+        }
+
         max_header_lines = findoptionI("maxheaderlines");
         if (max_header_lines == 0)
-            max_header_lines = 40;
+            max_header_lines = 50;
         if (!realitycheck(max_header_lines, 10, 250, "maxheaderlines")) {
             return false;
         }
@@ -339,7 +363,7 @@ bool OptionContainer::read(std::string& filename, int type)
 
         connect_timeout_sec = findoptionI("connecttimeout");
         if (connect_timeout_sec == 0)
-            connect_timeout_sec = 3;
+            connect_timeout_sec = 5;
         if (!realitycheck(connect_timeout_sec, 1, 100, "connecttimeout")) {
             return false;
         } // check its a reasonable value
@@ -347,47 +371,40 @@ bool OptionContainer::read(std::string& filename, int type)
 
         connect_retries = findoptionI("connectretries");
         if (connect_retries == 0)
-            connect_retries  = 5;
+            connect_retries = 1;
         if (!realitycheck(connect_retries, 1, 100, "connectretries")) {
             return false;
         } // check its a reasonable value
 
 
         proxy_timeout_sec = findoptionI("proxytimeout");
+        if (proxy_timeout_sec == 0) proxy_timeout_sec = 55;
         if (!realitycheck(proxy_timeout_sec, 5, 100, "proxytimeout")) {
             return false;
         } // check its a reasonable value
         proxy_timeout = proxy_timeout_sec * 1000;
 
-        proxy_failure_log_interval = findoptionI("proxyfailureloginterval");
-        if (proxy_failure_log_interval == 0)
-            proxy_failure_log_interval = 600; // 10 mins
-        if (!realitycheck(proxy_failure_log_interval, proxy_timeout_sec, 3600, "proxyfailureloginterval")) {
-            return false;
-        } // check its a reasonable value
-
         pcon_timeout_sec = findoptionI("pcontimeout");
+        if (pcon_timeout_sec == 0) pcon_timeout_sec = 55;
         if (!realitycheck(pcon_timeout_sec, 5, 300, "pcontimeout")) {
             return false;
         } // check its a reasonable value
         pcon_timeout = pcon_timeout_sec * 1000;
 
         exchange_timeout_sec = findoptionI("proxyexchange");
+        if (exchange_timeout_sec == 0) exchange_timeout_sec = 61;
         if (!realitycheck(exchange_timeout_sec, 5, 300, "proxyexchange")) {
             return false;
         }
-        exchange_timeout = exchange_timeout_sec  * 1000;
+        exchange_timeout = exchange_timeout_sec * 1000;
 
-        http_workers= findoptionI("httpworkers");
-        if (http_workers == 0) {
-		http_workers = 100;
-		if (!is_daemonised){
-               		std::cerr << " http_workers settings cannot be zero: value set to 100" << std::endl;
-		}
-                syslog(LOG_ERR, "http_workers settings cannot be zero: value set to 100");
-	}
+        if (findoptionS("httpworkers").empty()) {
+            http_workers = 500;
+        } else {
+            http_workers = findoptionI("httpworkers");
+        }
         if (!realitycheck(http_workers, 20, 20000, "httpworkers")) {
-        return false;
+            return false;
         } // check its a reasonable value
 
         monitor_helper = findoptionS("monitorhelper");
@@ -410,12 +427,16 @@ bool OptionContainer::read(std::string& filename, int type)
         } // check its a reasonable value
 
         if (max_content_filter_size == 0) {
-            max_content_filter_size = 1; // Minimal value 0 = 1
+            max_content_filter_size = 2048;
         }
 
         max_content_filter_size *= 1024;
 
-        max_content_ramcache_scan_size = findoptionI("maxcontentramcachescansize");
+        if(findoptionS("maxcontentramcachescansize").empty()) {
+            max_content_filecache_scan_size = 2000;
+        } else {
+            max_content_ramcache_scan_size = findoptionI("maxcontentramcachescansize");
+        }
         if (!realitycheck(max_content_ramcache_scan_size, 0, 0, "maxcontentramcachescansize")) {
             return false;
         }
@@ -425,27 +446,23 @@ bool OptionContainer::read(std::string& filename, int type)
         if (!realitycheck(max_content_filecache_scan_size, 0, 0, "maxcontentfilecachescansize")) {
             return false;
         }
+        if (max_content_filecache_scan_size == 0) {
+            max_content_filecache_scan_size = 20000;
+        }
         max_content_filecache_scan_size *= 1024;
 
         if (max_content_ramcache_scan_size == 0) {
             max_content_ramcache_scan_size = max_content_filecache_scan_size;
         }
-
-        weighted_phrase_mode = findoptionI("weightedphrasemode");
+        if ( findoptionS("weightedphrasemode").empty()) {
+            weighted_phrase_mode = 2;
+        } else {
+            weighted_phrase_mode = findoptionI("weightedphrasemode");
+        }
         if (!realitycheck(weighted_phrase_mode, 0, 2, "weightedphrasemode")) {
             return false;
         }
-        /*
-		if ((weighted_phrase_mode != 0)) {
-			max_content_filter_size = max_content_ramcache_scan_size;
-			if (max_content_filter_size == 0) {
-				if (!is_daemonised)
-					std::cerr << "maxcontent* settings cannot be zero (to disable phrase filtering, set weightedphrasemode to 0)" << std::endl;
-				syslog(LOG_ERR, "%s", "maxcontent* settings cannot be zero (to disable phrase filtering, set weightedphrasemode to 0)");
-				return false;
-			}
-		}
-*/
+
         bool contentscanning = findoptionM("contentscanner").size() > 0;
         if (contentscanning) {
 
@@ -458,22 +475,30 @@ bool OptionContainer::read(std::string& filename, int type)
             }
             if (max_content_ramcache_scan_size > max_content_filecache_scan_size) {
                 if (!is_daemonised) {
-                    std::cerr << "maxcontentramcachescansize can not be greater than maxcontentfilecachescansize" << std::endl;
+                    std::cerr << "maxcontentramcachescansize can not be greater than maxcontentfilecachescansize"
+                              << std::endl;
                 }
                 syslog(LOG_ERR, "%s", "maxcontentramcachescansize can not be greater than maxcontentfilecachescansize");
                 return false;
             }
 
             trickle_delay = findoptionI("trickledelay");
+            if (trickle_delay == 0) {
+                trickle_delay = 10;
+            }
             if (!realitycheck(trickle_delay, 1, 0, "trickledelay")) {
                 return false;
             }
             initial_trickle_delay = findoptionI("initialtrickledelay");
+            if (initial_trickle_delay == 0) {
+                initial_trickle_delay = 20;
+            }
             if (!realitycheck(initial_trickle_delay, 1, 0, "initialtrickledelay")) {
                 return false;
             }
 
             content_scanner_timeout_sec = findoptionI("contentscannertimeout");
+            if (content_scanner_timeout_sec == 0) content_scanner_timeout_sec = 60;
             if (!realitycheck(content_scanner_timeout_sec, 1, 0, "contentscannertimeout")) {
                 return false;
             }
@@ -485,17 +510,6 @@ bool OptionContainer::read(std::string& filename, int type)
                 content_scanner_timeout_sec = pcon_timeout_sec;
             }
 
-            if (findoptionS("scancleancache") == "off") {
-                scan_clean_cache = false;
-            } else {
-                scan_clean_cache = true;
-            }
-
-            if (findoptionS("contentscanexceptions") == "on") {
-                content_scan_exceptions = true;
-            } else {
-                content_scan_exceptions = false;
-            }
         }
 
         if (findoptionS("deletedownloadedtempfiles") == "off") {
@@ -505,23 +519,17 @@ bool OptionContainer::read(std::string& filename, int type)
         }
 
         if (findoptionS("searchsitelistforip"
-                                "") == "off") {
+                        "") == "off") {
             search_sitelist_for_ip = false;
         } else {
             search_sitelist_for_ip = true;
         }
 
-        url_cache_number = findoptionI("urlcachenumber");
-        if (!realitycheck(url_cache_number, 0, 0, "urlcachenumber")) {
-            return false;
-        } // check its a reasonable value
-
-        url_cache_age = findoptionI("urlcacheage");
-        if (!realitycheck(url_cache_age, 0, 0, "urlcacheage")) {
-            return false;
-        } // check its a reasonable value
-
-        phrase_filter_mode = findoptionI("phrasefiltermode");
+        if (findoptionS("phrasefiltermode").empty()) {
+            phrase_filter_mode = 2;
+        } else {
+            phrase_filter_mode = findoptionI("phrasefiltermode");
+        }
         if (!realitycheck(phrase_filter_mode, 0, 3, "phrasefiltermode")) {
             return false;
         }
@@ -540,16 +548,16 @@ bool OptionContainer::read(std::string& filename, int type)
             force_quick_search = false;
         }
 
-        if (findoptionS("mapportstoips") == "off") {
-            map_ports_to_ips = false;
-        } else {
+        if (findoptionS("mapportstoips") == "on") {  // to be removed in v5.5
             map_ports_to_ips = true;
+        } else {
+            map_ports_to_ips = false;
         }
 
-        if (findoptionS("mapauthtoports") == "off") {
-            map_auth_to_ports = false;
-        } else {
+        if (findoptionS("mapauthtoports") == "on") {  // to be removed in v5.5
             map_auth_to_ports = true;
+        } else {
+            map_auth_to_ports = false;
         }
 
         if (findoptionS("usecustombannedimage") == "off") {
@@ -557,6 +565,10 @@ bool OptionContainer::read(std::string& filename, int type)
         } else {
             use_custom_banned_image = true;
             custom_banned_image_file = findoptionS("custombannedimagefile");
+            if (custom_banned_image_file.empty()) {
+                custom_banned_image_file = __DATADIR;
+                custom_banned_image_file += "/transparent1x1.gif";
+            }
             banned_image.read(custom_banned_image_file.c_str());
         }
 
@@ -565,6 +577,11 @@ bool OptionContainer::read(std::string& filename, int type)
         } else {
             use_custom_banned_flash = true;
             custom_banned_flash_file = findoptionS("custombannedflashfile");
+
+            if (custom_banned_flash_file.empty()) {
+                custom_banned_flash_file = __DATADIR;
+                custom_banned_flash_file += "/blockedflash.swf";
+            }
             banned_flash.read(custom_banned_flash_file.c_str());
         }
 
@@ -576,13 +593,15 @@ bool OptionContainer::read(std::string& filename, int type)
 
         if (!no_proxy) {
             proxy_port = findoptionI("proxyport");
+            if(proxy_port == 0) proxy_port = 3128;
             if (!realitycheck(proxy_port, 1, 65535, "proxyport")) {
                 return false;
             } // etc
         }
 
         // multiple listen IP support
-        filter_ip = findoptionM("filterip");
+        filter_ip = findoptionMD("filterip",":");
+        if( filter_ip.empty()) filter_ip.push_back("");
         if (filter_ip.size() > 127) {
             if (!is_daemonised) {
                 std::cerr << "Can not listen on more than 127 IPs" << std::endl;
@@ -591,7 +610,7 @@ bool OptionContainer::read(std::string& filename, int type)
             return false;
         }
         // multiple check IP support - used for loop checking
-        check_ip = findoptionM("checkip");
+        check_ip = findoptionMD("checkip",":");
         if (check_ip.size() > 127) {
             if (!is_daemonised) {
                 std::cerr << "Can not check on more than 127 IPs" << std::endl;
@@ -599,18 +618,18 @@ bool OptionContainer::read(std::string& filename, int type)
             syslog(LOG_ERR, "%s", "Can not check on more than 127 IPs");
             return false;
         }
-        //if (check_ip.size() == 0) {   // set defaults
-            //if (filter_ip.size() > 0) {
-            //    check_ip = filter_ip;
-            //} else {
-            //    String t = "127.0.0.1";
-            //    check_ip.push_back(t);
-            //}
-        //}
-        filter_ports = findoptionM("filterports");
+        if (check_ip.empty()) {
+                String t = "127.0.0.1";
+                check_ip.push_back(t);
+        }
+
+        filter_ports = findoptionMD("filterports",":");
+        if (filter_ports.empty())
+            filter_ports.push_back("8080");
         if (map_ports_to_ips and filter_ports.size() != filter_ip.size()) {
             if (!is_daemonised) {
-                std::cerr << "filterports (" << filter_ports.size() << ") must match number of filterips (" << filter_ip.size() << ")" << std::endl;
+                std::cerr << "filterports (" << filter_ports.size() << ") must match number of filterips ("
+                          << filter_ip.size() << ")" << std::endl;
             }
             syslog(LOG_ERR, "%s", "filterports must match number of filterips");
             return false;
@@ -621,7 +640,7 @@ bool OptionContainer::read(std::string& filename, int type)
         } // check its a reasonable value
 
         transparenthttps_port = findoptionI("transparenthttpsport");
-        if (!realitycheck(filter_port, 0, 65535, "transparenthttpsport")) {
+        if (!realitycheck(transparenthttps_port, 0, 65535, "transparenthttpsport")) {
             return false;
         } // check its a reasonable value
 
@@ -630,7 +649,7 @@ bool OptionContainer::read(std::string& filename, int type)
             return false;
         } // check its a reasonable value
 
-        if(icap_port > 0) {   // add non-plugin auth for ICAP
+        if (icap_port > 0) {   // add non-plugin auth for ICAP
             auth_entry sen;
             sen.entry_function = "auth_icap";
             sen.entry_id = ENT_STORYA_AUTH_ICAP;
@@ -645,18 +664,22 @@ bool OptionContainer::read(std::string& filename, int type)
         if (icap_resmod_url == "")
             icap_resmod_url = "response";
 
-        if (findoptionS("useoriginalip") == "on") {
-            use_original_ip_port = true;
+        if (findoptionS("useoriginalip") == "off") {
+            use_original_ip_port = false;
         } else {
-            use_original_ip_port  = false;
+            use_original_ip_port = true;
         }
 
-
-        ll = findoptionI("loglevel");
+        if(findoptionS("loglevel").empty()) {
+            ll = 3;
+        } else {
+            ll = findoptionI("loglevel");
+        }
         if (!realitycheck(ll, 0, 3, "loglevel")) {
             return false;
         } // etc
         log_file_format = findoptionI("logfileformat");
+        if(log_file_format == 0) log_file_format = 8;
         if (!realitycheck(log_file_format, 1, 8, "logfileformat")) {
             return false;
         } // etc
@@ -705,10 +728,10 @@ bool OptionContainer::read(std::string& filename, int type)
             prod_id.assign("2");
 #endif
 
-        if (findoptionS("showweightedfound") == "on") {
-            show_weighted_found = true;
-        } else {
+        if (findoptionS("showweightedfound") == "off") {
             show_weighted_found = false;
+        } else {
+            show_weighted_found = true;
         }
         if (findoptionS("showallweightedfound") == "on") {
             show_all_weighted_found = true;
@@ -716,18 +739,36 @@ bool OptionContainer::read(std::string& filename, int type)
         } else {
             show_all_weighted_found = false;
         }
-        reporting_level = findoptionI("reportinglevel");
+        if(findoptionS("reportinglevel").empty()) {
+            reporting_level = 3;
+        } else {
+            reporting_level = findoptionI("reportinglevel");
+        }
         if (!realitycheck(reporting_level, -1, 3, "reportinglevel")) {
             return false;
         }
-        languagepath = findoptionS("languagedir") + "/" + findoptionS("language") + "/";
+        String t = findoptionS("languagedir") + "/" ;
+        if (t == "/") {
+            t = __DATADIR;
+            t += "/languages";
+        }
+        languagepath = t;
+        languagepath += "/";
+        languagepath += findoptionS("language") + "/";
 
         if (findoptionS("forwardedfor") == "on") {
             forwarded_for = true;
         } else {
             forwarded_for = false;
         }
-        log_exception_hits = findoptionI("logexceptionhits");
+        if (findoptionS("addforwardedfor") == "on") {
+            forwarded_for = true;
+        }
+        if (findoptionS("logexceptionhits").empty()) {
+            log_exception_hits = 2;
+        } else {
+            log_exception_hits = findoptionI("logexceptionhits");
+        }
         if (!realitycheck(log_exception_hits, 0, 2, "logexceptionhits")) {
             return false;
         }
@@ -781,12 +822,13 @@ bool OptionContainer::read(std::string& filename, int type)
         xforwardedfor_filter_ip = findoptionM("xforwardedforfilterip");
 
         filter_groups = findoptionI("filtergroups");
+        if (filter_groups == 0) filter_groups = 1;
 
         default_fg = findoptionI("defaultfiltergroup");
         if (default_fg > 0) {
             if (default_fg <= filter_groups) {
                 default_fg--;
-            } else  {
+            } else {
                 syslog(LOG_ERR, "defaultfiltergroup out of range");
                 return false;
             }
@@ -796,7 +838,7 @@ bool OptionContainer::read(std::string& filename, int type)
         if (default_trans_fg > 0) {
             if (default_trans_fg <= filter_groups) {
                 default_trans_fg--;
-            } else  {
+            } else {
                 syslog(LOG_ERR, "defaulttransparentfiltergroup out of range");
                 return false;
             }
@@ -806,31 +848,33 @@ bool OptionContainer::read(std::string& filename, int type)
         if (default_icap_fg > 0) {
             if (default_icap_fg <= filter_groups) {
                 default_icap_fg--;
-            } else  {
+            } else {
                 syslog(LOG_ERR, "defaulticapfiltergroup out of range");
                 return false;
             }
         }
 
-        if (findoptionS("abortiflistmissing") == "on")
-        {
+        if (findoptionS("abortiflistmissing") == "on") {
             abort_on_missing_list = true;
         } else {
             abort_on_missing_list = false;
         }
 
-        if (findoptionS("storyboardtrace") == "on")
-        {
+        if (findoptionS("storyboardtrace") == "on") {
             SB_trace = true;
         } else {
             SB_trace = false;
         }
 
         storyboard_location = findoptionS("preauthstoryboard");
+        if (storyboard_location.empty()) {
+            storyboard_location = __CONFDIR;
+            storyboard_location += "/preauth.story";
 
-        if (((per_room_directory_location = findoptionS("perroomdirectory")) != "") || ((per_room_directory_location = findoptionS("perroomblockingdirectory")) != "")) {
-            //loadRooms(true);
+
         }
+
+        per_room_directory_location = findoptionS("perroomdirectory");
 
         if (!realitycheck(filter_groups, 1, 0, "filtergroups")) {
             return false;
@@ -840,6 +884,14 @@ bool OptionContainer::read(std::string& filename, int type)
                 std::cerr << "filtergroups too small" << std::endl;
             }
             return false;
+        }
+
+        if ((internal_test_url = findoptionS("internaltesturl")).empty()) {
+            internal_test_url = "internal.test.e2guardian.org";
+        }
+
+        if ((internal_status_url = findoptionS("internalstatusurl")).empty()) {
+            internal_status_url = "internal.status.e2guardian.org";
         }
 
         if (!loadDMPlugins()) {
@@ -853,6 +905,9 @@ bool OptionContainer::read(std::string& filename, int type)
         // this needs to be known before loading CS plugins,
         // because ClamAV plugin makes use of it during init()
         download_dir = findoptionS("filecachedir");
+        if (download_dir.empty()) {
+            download_dir = "/tmp";
+        }
 
         if (contentscanning) {
             if (!loadCSPlugins()) {
@@ -882,7 +937,7 @@ bool OptionContainer::read(std::string& filename, int type)
 
         // map port numbers to auth plugin names
         for (unsigned int i = 0; i < authplugins.size(); i++) {
-            AuthPlugin *tmpPlugin = (AuthPlugin *)authplugins[i];
+            AuthPlugin *tmpPlugin = (AuthPlugin *) authplugins[i];
             String tmpStr = tmpPlugin->getPluginName();
 
             if ((!map_auth_to_ports) || filter_ports.size() == 1)
@@ -896,7 +951,7 @@ bool OptionContainer::read(std::string& filename, int type)
             std::deque<Plugin *>::iterator it = authplugins.begin();
             String firstPlugin;
             while (it != authplugins.end()) {
-                AuthPlugin *tmp = (AuthPlugin *)*it;
+                AuthPlugin *tmp = (AuthPlugin *) *it;
                 if (tmp->getPluginName().startsWith("proxy-basic")) {
                     if (!is_daemonised)
                         std::cerr << "Proxy auth is not possible with multiple ports" << std::endl;
@@ -929,7 +984,7 @@ bool OptionContainer::read(std::string& filename, int type)
         numfg = filter_groups;
 
         //filter_groups_list_location = findoptionS("filtergroupslist");
-   //     banned_ip_list_location = findoptionS("bannediplist");
+        //     banned_ip_list_location = findoptionS("bannediplist");
         group_names_list_location = findoptionS("groupnamesfile");
         std::string language_list_location(languagepath + "messages");
         iplist_dq = findoptionM("iplist");
@@ -940,8 +995,8 @@ bool OptionContainer::read(std::string& filename, int type)
         maplist_dq = findoptionM("maplist");
         ipmaplist_dq = findoptionM("ipmaplist");
 
-            if ((findoptionS("authrequiresuserande2roup") == "on") && (authplugins.size() > 1))
-                auth_requires_user_and_group = true;
+        if ((findoptionS("authrequiresuserande2roup") == "on") && (authplugins.size() > 1))
+            auth_requires_user_and_group = true;
 
         if (group_names_list_location.length() == 0) {
             use_group_names_list = false;
@@ -951,7 +1006,6 @@ bool OptionContainer::read(std::string& filename, int type)
         } else {
             use_group_names_list = true;
         }
-
 
 
         if (!language_list.readLanguageList(language_list_location.c_str())) {
@@ -989,8 +1043,7 @@ bool OptionContainer::read(std::string& filename, int type)
 }
 
 
-bool OptionContainer::readinStdin()
-{
+bool OptionContainer::readinStdin() {
     if (!std::cin.good()) {
         if (!is_daemonised) {
             std::cerr << thread_id << "Error reading stdin: " << std::endl;
@@ -999,11 +1052,11 @@ bool OptionContainer::readinStdin()
         return false;
     }
     std::string linebuffer;
-    String temp ;
+    String temp;
     while (!std::cin.eof()) {
-    //   std::cerr << "wiating for stdin" << std::endl;
+        //   std::cerr << "wiating for stdin" << std::endl;
         getline(std::cin, linebuffer);
-    //    std::cerr << "Line in: " << linebuffer << std::endl;
+        //    std::cerr << "Line in: " << linebuffer << std::endl;
         if (linebuffer.length() < 2)
             continue; // its jibberish
 
@@ -1022,7 +1075,7 @@ bool OptionContainer::readinStdin()
             String t = param;
             bool startswith;
             t.removeWhiteSpace();
-            t = t + ",";
+            t += ",";
             while (t.length() > 0) {
                 if (t.startsWith("name=")) {
                     nm = t.after("=").before(",");
@@ -1039,16 +1092,16 @@ bool OptionContainer::readinStdin()
                 // syntax error
                 return false;
             }
-            if(site_list)
+            if (site_list)
                 startswith = false;
             else
                 startswith = true;
 
-            int rc = lm.newItemList(fpath.c_str(),startswith,1, true);
+            int rc = lm.newItemList(fpath.c_str(), "", startswith, 1, true);
             if (rc < 0)
                 return false;
-             lm.l[rc]->doSort(url_list);
-            if(site_list)
+            lm.l[rc]->doSort(url_list);
+            if (site_list)
                 sitelist_dq.push_back(param);
             else
                 urllist_dq.push_back(param);
@@ -1058,14 +1111,12 @@ bool OptionContainer::readinStdin()
 }
 
 
-long int OptionContainer::findoptionI(const char *option)
-{
+long int OptionContainer::findoptionI(const char *option) {
     long int res = String(findoptionS(option).c_str()).toLong();
     return res;
 }
 
-std::string OptionContainer::findoptionS(const char *option)
-{
+std::string OptionContainer::findoptionS(const char *option) {
     // findoptionS returns a found option stored in the deque
     String temp;
     String temp2;
@@ -1099,9 +1150,15 @@ std::string OptionContainer::findoptionS(const char *option)
     return "";
 }
 
-std::deque<String> OptionContainer::findoptionM(const char *option)
-{
+std::deque<String> OptionContainer::findoptionM(const char *option) {
     // findoptionS returns all the matching options
+    return findoptionMD(option, nullptr);
+}
+
+
+
+std::deque<String> OptionContainer::findoptionMD(const char *option, const char *delim) {
+    // findoptionMD returns all instances of an option & allows multiple entries on a line separated by delim
     String temp;
     String temp2;
     String o(option);
@@ -1129,14 +1186,20 @@ std::deque<String> OptionContainer::findoptionM(const char *option)
             if (temp.endsWith("'")) { // inverted commas
                 temp.chop();
             }
-            results.push_back(temp);
+            if (delim != nullptr) {
+                while (temp.contains(delim)) {
+                    String t = temp.before(delim);
+                    if(!t.empty()) results.push_back(t);
+                    temp = temp.after(delim);
+                }
+            }
+            if(!temp.empty()) results.push_back(temp);
         }
     }
     return results;
 }
 
-bool OptionContainer::realitycheck(long int l, long int minl, long int maxl, const char *emessage)
-{
+bool OptionContainer::realitycheck(long int l, long int minl, long int maxl, const char *emessage) {
     // realitycheck checks an amount for certain expected criteria
     // so we can spot problems in the conf files easier
     if ((l < minl) || ((maxl > 0) && (l > maxl))) {
@@ -1154,8 +1217,7 @@ bool OptionContainer::realitycheck(long int l, long int minl, long int maxl, con
 }
 
 
-bool OptionContainer::loadDMPlugins()
-{
+bool OptionContainer::loadDMPlugins() {
     std::deque<String> dq = findoptionM("downloadmanager");
     unsigned int numplugins = dq.size();
     if (numplugins < 1) {
@@ -1201,8 +1263,7 @@ bool OptionContainer::loadDMPlugins()
     return true;
 }
 
-bool OptionContainer::loadCSPlugins()
-{
+bool OptionContainer::loadCSPlugins() {
     std::deque<String> dq = findoptionM("contentscanner");
     unsigned int numplugins = dq.size();
     if (numplugins < 1) {
@@ -1247,8 +1308,7 @@ bool OptionContainer::loadCSPlugins()
     return true;
 }
 
-bool OptionContainer::loadAuthPlugins()
-{
+bool OptionContainer::loadAuthPlugins() {
     // Assume no auth plugins need an upstream proxy query (NTLM, BASIC) until told otherwise
     auth_needs_proxy_query = false;
 
@@ -1310,8 +1370,8 @@ bool OptionContainer::loadAuthPlugins()
 }
 
 
-bool OptionContainer::createLists(int load_id)  {
-    std::shared_ptr<LOptionContainer> temp (new LOptionContainer(load_id));
+bool OptionContainer::createLists(int load_id) {
+    std::shared_ptr<LOptionContainer> temp(new LOptionContainer(load_id));
     if (temp->loaded_ok) {
         current_LOC = temp;
         return true;
@@ -1320,6 +1380,6 @@ bool OptionContainer::createLists(int load_id)  {
 }
 
 
-std::shared_ptr<LOptionContainer> OptionContainer::currentLists()  {
+std::shared_ptr<LOptionContainer> OptionContainer::currentLists() {
     return current_LOC;
 }

@@ -232,7 +232,7 @@ char *LOptionContainer::inURLList(String &url, ListContainer *lc, bool ip, bool 
     return NULL;
 }
 
-
+#ifdef NOTDEF
 bool LOptionContainer::doReadItemList(const char *filename, ListContainer *lc, const char *fname, bool swsort)
 {
     bool result = lc->readItemList(filename, false, 0);
@@ -249,6 +249,7 @@ bool LOptionContainer::doReadItemList(const char *filename, ListContainer *lc, c
         lc->doSort(false);
     return true;
 }
+#endif
 
 bool LOptionContainer::inExceptionIPList(const std::string *ip, std::string *&host)
 {
@@ -548,14 +549,14 @@ void LOptionContainer::loadRooms(bool throw_error)
                 temp = linestr;
                 if (temp.startsWith("#SITELIST")) {
                     ListContainer *sitelist = new ListContainer();
-                    if (sitelist->ifsReadSortItemList(&infile, true, "#ENDLIST", false, false, 0, filename.c_str())) {
+                    if (sitelist->ifsReadSortItemList(&infile, "", "", true, "#ENDLIST", false, false, 0, filename.c_str())) {
                         this_room.sitelist = sitelist;
                     } else {
                         delete sitelist;
                     }
                 } else if (temp.startsWith("#URLLIST")) {
                     ListContainer *urllist = new ListContainer();
-                    if (urllist->ifsReadSortItemList(&infile, true, "#ENDLIST", false, true, 0, filename.c_str())) {
+                    if (urllist->ifsReadSortItemList(&infile,"", "",  true, "#ENDLIST", false, true, 0, filename.c_str())) {
                         this_room.urllist = urllist;
                     } else {
                         delete urllist;
@@ -733,7 +734,7 @@ bool LOptionContainer::readFilterGroupConf()
             std::cerr << thread_id << "Group name: " << groupname << std::endl;
 #endif
         }
-        if (!readAnotherFilterGroupConf(file.toCharArray(), groupname.toCharArray(), need_html)) {
+        if (!readAnotherFilterGroupConf(file.toCharArray(), groupname.toCharArray(), need_html, i)) {
             if (!is_daemonised) {
                 std::cerr << thread_id << "Error opening filter group config: " << file << std::endl;
             }
@@ -744,7 +745,7 @@ bool LOptionContainer::readFilterGroupConf()
     return true;
 }
 
-bool LOptionContainer::readAnotherFilterGroupConf(const char *filename, const char *groupname, bool &need_html)
+bool LOptionContainer::readAnotherFilterGroupConf(const char *filename, const char *groupname, bool &need_html, int fg_no)
 {
 #ifdef E2DEBUG
     std::cerr << thread_id << "adding filter group: " << numfg << " " << filename << std::endl;
@@ -773,6 +774,9 @@ bool LOptionContainer::readAnotherFilterGroupConf(const char *filename, const ch
 
     // pass in the group name
     (*fg[numfg]).name = groupname;
+
+    // pass in the group number
+    (*fg[numfg]).filtergroup = fg_no;
 
     // pass in the reporting level - can be overridden
     (*fg[numfg]).reporting_level = reporting_level;

@@ -95,6 +95,10 @@ class String : public std::string
     int indexOf(const char *s) const;
     // does it contain this text?
     bool contains(const char *s) const;
+    // chop to base dir (for file paths)
+    void baseDir();
+    // convert relative path filename to fully pathed
+    void fullPath(String &base_dir);
     // index operator mark 2
     unsigned char charAt(int index)
     {
@@ -125,6 +129,8 @@ class String : public std::string
     String getHostname();
     // truncate to given length
     int limitLength(unsigned int l);
+    // remove all occurrences of char from String
+    void removeChar(char c);
     // remove repeated occurrences of this character
     void removeMultiChar(unsigned char c);
     // clean up slashes, trailing dots, etc. in file paths
@@ -140,6 +146,9 @@ class String : public std::string
     // get CN name that is oK for cert from url
     String CN();
  //   bool isNull();
+
+    // redact string/url
+    String anonimise();
 };
 
 #endif

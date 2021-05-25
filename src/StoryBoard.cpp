@@ -84,6 +84,10 @@ bool StoryBoard::readFile(const char *filename, ListMeta &LM, bool is_top) {
         syslog(LOG_ERR, "Error opening Storyboard file (does it exist?): %s", filename);
         return false;
     }
+
+    String base_dir(filename);
+    base_dir.baseDir();
+
     bool caseinsensitive = true;
     unsigned int line_no = 0;
     while (!listfile.eof()) { // keep going until end of file
@@ -101,6 +105,7 @@ bool StoryBoard::readFile(const char *filename, ListMeta &LM, bool is_top) {
         if (line.startsWith(".")) {
             temp = line.after(".Include<").before(">");
             if (temp.length() > 0) {
+                temp.fullPath(base_dir);
                 if (!readFile(temp.toCharArray(), *LMeta, false)) {
                     listfile.close();
                     return false;
@@ -503,6 +508,10 @@ bool StoryBoard::runFunct(unsigned int fID, NaughtyFilter &cm) {
             case SB_STATE_TRUE:
                 state_result = true;
                 break;
+            default:
+                state_result = false;
+                std::cerr << "unknown SB state number " << i->state << std::endl;
+                break;
         }
 #ifdef SBDEBUG
         std::cerr << "SB state " << F->getState(i->state) << " target " << target << " target2 " << target2
@@ -533,8 +542,10 @@ bool StoryBoard::runFunct(unsigned int fID, NaughtyFilter &cm) {
                             if(j->type == LIST_TYPE_REGEXP_REP) {
                                 *u = res.result;
                             }
-                            if (res.anon_log)
-                                cm.anon_log = true;
+                            if (res.anon_log) {
+                                cm.anon_user = true;
+                                cm.anon_url = true;
+                            }
                         }
 #ifdef SBDEBUG
                         std::cerr << "SB lc" << cm.lastcategory << " mess_no " << cm.message_no << " log_mess "
@@ -576,8 +587,10 @@ bool StoryBoard::runFunct(unsigned int fID, NaughtyFilter &cm) {
                         cm.log_message_no = res.log_mess_no;
                         cm.lastmatch = res.match;
                         cm.result = res.result;
-                        if (res.anon_log)
-                            cm.anon_log = true;
+                        if (res.anon_log) {
+                            cm.anon_user = true;
+                            cm.anon_url = true;
+                        }
                     }
 
 #ifdef SBDEBUG
@@ -620,8 +633,10 @@ bool StoryBoard::runFunct(unsigned int fID, NaughtyFilter &cm) {
                             cm.log_message_no = res.log_mess_no;
                             cm.lastmatch = res.match;
                             cm.result = res.result;
-                            if (res.anon_log)
-                                cm.anon_log = true;
+                            if (res.anon_log) {
+                                cm.anon_user = true;
+                                cm.anon_url = true;
+                            }
                         }
 #ifdef SBDEBUG
                         std::cerr << "SB lc" << cm.lastcategory << " mess_no " << cm.message_no << " log_mess "
@@ -706,11 +721,11 @@ bool StoryBoard::runFunct(unsigned int fID, NaughtyFilter &cm) {
                     if( cm.message_no == 503)
                         cm.whatIsNaughty = o.language_list.getTranslation(cm.message_no) ;
                     else
-                        cm.whatIsNaughty = o.language_list.getTranslation(cm.message_no) + cm.lastmatch;
+                        cm.whatIsNaughty = o.language_list.getTranslation(cm.message_no) + cm.get_lastmatch();
                     if (cm.log_message_no == 0)
-                        cm.whatIsNaughtyLog = o.language_list.getTranslation(cm.message_no) + cm.lastmatch;
+                        cm.whatIsNaughtyLog = o.language_list.getTranslation(cm.message_no) + cm.get_lastmatch();
                     else
-                        cm.whatIsNaughtyLog = o.language_list.getTranslation(cm.log_message_no) + cm.lastmatch;
+                        cm.whatIsNaughtyLog = o.language_list.getTranslation(cm.log_message_no) + cm.get_lastmatch();
                     cm.whatIsNaughtyCategories = cm.lastcategory;
                     break;
                 case SB_FUNC_SETMODURL:

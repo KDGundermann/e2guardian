@@ -115,7 +115,7 @@ HTMLTemplate *FOptionContainer::getHTMLTemplate(bool upfail)
 // read in the given file, write the list's ID into the given identifier,
 // sort using startsWith or endsWith depending on sortsw,
 // listname is used in error messages.
-bool FOptionContainer::readFile(const char *filename, unsigned int *whichlist, bool sortsw, bool cache, const char *listname)
+bool FOptionContainer::readFile(const char *filename, const char *list_pwd, unsigned int *whichlist, bool sortsw, bool cache, const char *listname)
 {
     if (strlen(filename) < 3) {
         if (!is_daemonised) {
@@ -124,7 +124,7 @@ bool FOptionContainer::readFile(const char *filename, unsigned int *whichlist, b
         syslog(LOG_ERR, "Required Listname %s is not defined", listname);
         return false;
     }
-    int res = o.lm.newItemList(filename, sortsw, 1, true);
+    int res = o.lm.newItemList(filename, list_pwd, sortsw, 1, true);
     if (res < 0) {
         if (!is_daemonised) {
             std::cerr << thread_id << "Error opening " << listname << std::endl;
@@ -143,8 +143,9 @@ bool FOptionContainer::readFile(const char *filename, unsigned int *whichlist, b
     return true;
 }
 
-bool FOptionContainer::readConfFile(const char *filename) {
+bool FOptionContainer::readConfFile(const char *filename, String &list_pwd) {
     std::string linebuffer;
+    String now_pwd(list_pwd);
     String temp; // for tempory conversion and storage
     std::ifstream conffiles(filename, std::ios::in); // e2guardianfN.conf
     if (!conffiles.good()) {
@@ -154,6 +155,12 @@ bool FOptionContainer::readConfFile(const char *filename) {
         syslog(LOG_ERR, "Error reading %s", filename);
         return false;
     }
+    String base_dir(filename);
+    base_dir.baseDir();
+    //String base_dir = filename;
+    //size_t fnsize;
+    //if ((fnsize = base_dir.find_last_of("/")) > 0)
+    //      base_dir = base_dir.subString(1,fnsize);
     while (!conffiles.eof()) {
         getline(conffiles, linebuffer);
         if (!conffiles.fail() && linebuffer.length() != 0) {
@@ -163,16 +170,40 @@ bool FOptionContainer::readConfFile(const char *filename) {
                     temp = temp.before("#");
                 }
                 temp.removeWhiteSpace(); // get rid of spaces at end of line
+                // check for LISTDIR and add replace with now_pwd
+                while (temp.contains("__LISTDIR__")) {
+                    String temp2 = temp.before("__LISTDIR__");
+                    temp2 += now_pwd;
+                    temp2 += temp.after("__LISTDIR__");
+                    temp = temp2;
+                }
+
                 // deal with included files
                 if (temp.startsWith(".")) {
-                    temp = temp.after(".Include<").before(">");
-                    if (temp.length() > 0) {
-                        if (!readConfFile(temp.toCharArray())) {
+                    String temp2 = temp.after(".Include<").before(">");
+                    if (temp2.length() > 0) {
+                        temp2.fullPath(base_dir);
+                        if (!readConfFile(temp2.toCharArray(), now_pwd)) {
                             conffiles.close();
                             return false;
                         }
+                        continue;
                     }
+                    temp2 = temp.after(".Define LISTDIR <").before(">");
+                    if (temp2.length() > 0) {
+                        now_pwd = temp2;
+                        //if(!now_pwd.endsWith("/"))
+                            //now_pwd += "/";
+                      // std::cerr << "now_pwd set to " << now_pwd;
+                    }
+
                     continue;
+                }
+                // append ,listdir=now_pwd if line contains a file path - so that now_pwd can be passed
+                // to list file handler so that it can honour __LISTDIR__ in Included listfiles
+                if (temp.contains("path=") && !temp.contains("listdir=")) {
+                    temp += ",listdir=";
+                    temp += now_pwd;
                 }
                 linebuffer = temp.toCharArray();
                 conffile.push_back(linebuffer); // stick option in deque
@@ -187,7 +218,11 @@ bool FOptionContainer::read(const char *filename) {
     try { // all sorts of exceptions could occur reading conf files
         std::string linebuffer;
         String temp; // for tempory conversion and storage
-        if(!readConfFile(filename))
+        String list_pwd = __CONFDIR;
+        list_pwd += "/lists/group";
+        list_pwd += String(filtergroup);
+        //list_pwd += "/";
+        if(!readConfFile(filename, list_pwd))
             return false;
 
 #ifdef E2DEBUG
@@ -369,9 +404,13 @@ bool FOptionContainer::read(const char *filename) {
 
 #endif
         // override default reporting level
-        reporting_level = findoptionI("reportinglevel");
-        if (!realitycheck(reporting_level, -1, 3, "reportinglevel")) {
-            return false;
+        if (findoptionS("reportinglevel").empty()) {   //uses value from e2guardian.conf if empty
+            reporting_level = o.reporting_level;
+        } else {
+            reporting_level = findoptionI("reportinglevel");
+            if (!realitycheck(reporting_level, -1, 3, "reportinglevel")) {
+                return false;
+            }
         }
 
         if (reporting_level == 0) {
@@ -380,7 +419,11 @@ bool FOptionContainer::read(const char *filename) {
         }
 
         long temp_max_upload_size;
-        temp_max_upload_size = findoptionI("maxuploadsize");
+        if (findoptionS("maxuploadsize").empty()) {
+            temp_max_upload_size = -1;
+        } else {
+            temp_max_upload_size = findoptionI("maxuploadsize");
+        }
 
         if ((realitycheck(temp_max_upload_size, -1, 10000000, "max_uploadsize")) && (temp_max_upload_size != 0)) {
             max_upload_size = temp_max_upload_size;
@@ -494,7 +537,8 @@ bool FOptionContainer::read(const char *filename) {
 	    if (findoptionS("groupname").length() > 0) {
             	name = findoptionS("groupname");
 	    } else {
-		name = "no_name_group";
+		name = "group";
+        name += String(filtergroup);
 	    }
 #ifdef E2DEBUG
             std::cerr << thread_id << "Group name: " << name << std::endl;
@@ -522,6 +566,12 @@ bool FOptionContainer::read(const char *filename) {
         std::string banned_phrase_list_location(findoptionS("bannedphraselist"));
 
         std::string storyboard_location(findoptionS("storyboard"));
+        if( storyboard_location.empty()) {
+            storyboard_location = __CONFDIR;
+            storyboard_location += "/group";
+            storyboard_location += String(filtergroup);
+            storyboard_location += ".story";
+        }
 
 #ifdef E2DEBUG
         std::cerr << thread_id << "Read settings into memory" << std::endl;
@@ -530,6 +580,9 @@ bool FOptionContainer::read(const char *filename) {
 
         if (weighted_phrase_mode > 0) {
             naughtyness_limit = findoptionI("naughtynesslimit");
+            if (naughtyness_limit == 0) {
+                naughtyness_limit = 60;
+            }
             if (!realitycheck(naughtyness_limit, 1, 0, "naughtynesslimit"))
                 return false;
 
@@ -658,7 +711,7 @@ bool FOptionContainer::read(const char *filename) {
 	std::string content_regexp_list_location(findoptionS("contentregexplist"));
 	if (content_regexp_list_location.length() > 1) {
 		unsigned int content_regexp_list;
-		if (!LMeta.readRegExReplacementFile(content_regexp_list_location.c_str(), "contentregexplist", content_regexp_list, content_regexp_list_rep, content_regexp_list_comp)) {
+		if (!LMeta.readRegExReplacementFile(content_regexp_list_location.c_str(), list_pwd.toCharArray(), "contentregexplist", content_regexp_list, content_regexp_list_rep, content_regexp_list_comp)) {
              		return false;
 		} else {
 			content_regexp_flag = true;
@@ -874,15 +927,16 @@ std::deque<String> FOptionContainer::findoptionM(const char *option)
             while (temp.startsWith(" ")) { // get rid of heading spaces
                 temp.lop();
             }
-            if (temp.startsWith("'")) { // inverted commas
-                temp.lop();
-            }
+//            if (temp.startsWith("'")) { // inverted commas
+//                temp.lop();
+//            }
+            temp.removeMultiChar('\'');
             while (temp.endsWith(" ")) { // get rid of tailing spaces
                 temp.chop();
             }
-            if (temp.endsWith("'")) { // inverted commas
-                temp.chop();
-            }
+  //          if (temp.endsWith("'")) { // inverted commas
+  //              temp.chop();
+   //         }
             results.push_back(temp);
         }
     }

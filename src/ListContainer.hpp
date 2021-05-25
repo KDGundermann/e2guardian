@@ -76,7 +76,9 @@ public:
     String group;
     int operator<(const datamap &a) const
     {
-        return key.compare(a.key);
+        if (key.compare(a.key) < 0)
+            return 1;
+        return 0;
     };
     int operator==(const String &a) const
     {
@@ -131,9 +133,9 @@ class ListContainer
     void reset();
 
     bool readPhraseList(const char *filename, bool isexception, int catindex = -1, int timeindex = -1, bool incref = true, int nlimit=0);
-    bool ifsreadItemList(std::istream *input, int len, bool checkendstring, const char *endstring, bool do_includes, bool startswith, int filters);
-    bool ifsReadSortItemList(std::ifstream *input, bool checkendstring, const char *endstring, bool do_includes, bool startswith, int filters, const char *filename);
-    bool readItemList(const char *filename, bool startswith, int filters, bool isip = false, bool istime = false, bool ismap = false);
+    bool ifsreadItemList(std::istream *input, String basedir, const char *list_pwd, int len, bool checkendstring, const char *endstring, bool do_includes, bool startswith, int filters);
+    bool ifsReadSortItemList(std::ifstream *input, String basedir, const char *list_pwd, bool checkendstring, const char *endstring, bool do_includes, bool startswith, int filters, const char *filename);
+    bool readItemList(const char *filename, const char *pwd, bool startswith, int filters, bool isip = false, bool istime = false, bool ismap = false);
     bool readStdinItemList(bool startswith, int filters);
     bool inList(const char *string, String &lastcategory);
     bool inListEndsWith(const char *string, String &lastcategory);
@@ -145,6 +147,7 @@ class ListContainer
     char *findStartsWith(const char *string, String &lastcategory);
     char *findStartsWithPartial(const char *string, String &lastcategory);
     String searchIPMap(int a, int s, const uint32_t &ip);
+    String searchDataMap(int a, int s, const String  &key);
     String inSubnetMap(const uint32_t &ip);
     String inIPRangeMap(const uint32_t &ip);
 
@@ -236,12 +239,12 @@ class ListContainer
     std::list<rangestruct> ipmaprangelist;
     std::list<subnetstruct> ipmapsubnetlist;
     //std::list<datamap> datamaplist;
-    std::deque<datamap> datamaplist;
+    std::vector<datamap> datamaplist;
 
     //timelists
     std::vector<TimeLimit> timelist;
 
-    bool readAnotherItemList(const char *filename, bool startswith, int filters);
+    bool readAnotherItemList(const char *filename, const char *list_pwd, bool startswith, int filters);
 
     void readPhraseListHelper(String line, bool isexception, int catindex, int timeindex, int &nlimit);
     void readPhraseListHelper2(String phrase, int type, int weighting, int catindex, int timeindex);
@@ -256,7 +259,7 @@ class ListContainer
     void addToIPList(String &line);
     void addToIPMap(String &line);
     void addToDataMap(String &line);
-    void addToTimeList(String &line);
+    bool addToTimeList(String &line);
     int greaterThanEWF(const char *a, const char *b); // full match
     int greaterThanEW(const char *a, const char *b); // partial ends with
     int greaterThanSWF(const char *a, const char *b); // full match
